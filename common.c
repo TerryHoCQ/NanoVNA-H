@@ -149,10 +149,11 @@ int get_str_index(const char *v, const char *list) {
  * Search first symbols (s2) entry in string (s1)
  */
 static inline char* _strpbrk(char *s1, const char *s2) {
-  do {
+  while(*s1) {
     const char *s = s2;
     while(*s) if (*s++ == *s1) return s1;
-  } while(*++s1);
+    s1++;
+  }
   return s1;
 }
 

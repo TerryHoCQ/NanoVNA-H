@@ -72,7 +72,7 @@ static const uint32_t pow10[FLOAT_PRECISION+1] = {
 static const char bigPrefix[] = {' ', 'k', 'M', 'G',  'T',  'P',  'E',  'Z',  'Y', 0};
 // Prefixes for values less   then 1.0
 //                                 1e-3,    1e-6, 1e-9, 1e-12, 1e-15, 1e-18, 1e-21, 1e-24
-static const char smallPrefix[] = { 'm', S_MICRO,  'n',   'p',   'f',   'a',   'z',   'y', 0};
+static const char smallPrefix[] = { 'm', S_MICRO[0],  'n',   'p',   'f',   'a',   'z',   'y', 0};
 
 #pragma pack(pop)
 
@@ -84,7 +84,7 @@ static char *long_to_string_with_divisor(char *p,
   char *b = q;
   // convert to string from end buffer to begin
   do {
-    uint8_t c = num % radix;
+    uint32_t c = num % radix;
     num /= radix;
     *--q = c + ((c > 9) ? ('A'-10) : '0');
   }while((precision && --precision) || num);
@@ -102,9 +102,7 @@ static char *long_to_string_with_divisor(char *p,
 #define FREQ_PSET            1
 #define FREQ_PREFIX_SPACE    2
 
-static char *
-ulong_freq(char *p, pfreq_t freq, int precision)
-{
+static char *ulong_freq(char *p, pfreq_t freq, int precision) {
   uint8_t flag = FREQ_PSET;
   if (precision == 0)
     flag|=FREQ_PREFIX_SPACE;
@@ -424,8 +422,8 @@ int chvprintf(BaseSequentialStream *chp, const char *fmt, va_list ap) {
 #endif
       if (state & COMPLEX)
         *p++ = 'j';
-      if (value.f == infinityf()){
-        *p++ = 0x19; *p++ = ' ';
+      if (vna_isinff(value.f)) {
+        *p++ = S_INFINITY[0]; *p++ = ' ';
         break;
       }
       // Set default precision

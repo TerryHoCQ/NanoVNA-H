@@ -21,6 +21,10 @@ endif
 # additional options, use math optimisations
 USE_OPT+= -ffast-math -fsingle-precision-constant
 #USE_OPT+= -D__MS5351__
+# additional size optimisations (also give small speedup)
+USE_OPT+= -fno-reorder-blocks
+# small size optimisations (slowdown code)
+#USE_OPT+= -fno-jump-tables -fno-move-loop-invariants
 
 
 # C specific options here (added to USE_OPT).
@@ -45,7 +49,7 @@ endif
 
 # Enable this if you want link time optimizations (LTO)
 ifeq ($(USE_LTO),)
-  USE_LTO = yes
+  USE_LTO = no
 endif
 
 # If enabled, this option allows to compile the application in THUMB mode.
@@ -255,7 +259,7 @@ endif
 UDEFS+= -DVNA_AUTO_SELECT_RTC_SOURCE
 #Enable if install external 32.768kHz clock quartz on PC14 and PC15 pins on STM32 CPU and no VNA_AUTO_SELECT_RTC_SOURCE
 #UDEFS+= -DVNA_USE_LSE
-#UDEFS+= -D__VNA_Z_RENORMALIZATION__ -D__VNA_FAST_LINES__
+#UDEFS+= -D__VNA_Z_RENORMALIZATION__ -D__VNA_FAST_RENDER__
 
 # Define ASM defines here
 UADEFS =

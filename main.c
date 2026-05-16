@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2019-2025, zeenko.tech
- * Copyright (c) 2019-2025, Dmitry (DiSlord) dislordlive@gmail.com
+ * Copyright (c) 2019-2026, zeenko.tech
+ * Copyright (c) 2019-2026, Dmitry (DiSlord) dislordlive@gmail.com
  * Based on TAKAHASHI Tomohiro (TTRFTECH) edy555@gmail.com
  * All rights reserved.
  *
@@ -127,12 +127,12 @@ static uint16_t p_sweep = 0;
 float measured[2][SWEEP_POINTS_MAX][2];
 
 #undef VERSION
-#define VERSION "1.2.44"
+#define VERSION "1.2.50"
 
 // Version text, displayed in Config->Version menu, also send by info command
 const char *info_about[]={
   "Board: " BOARD_NAME,
-  "2019-2025 Copyright NanoVNA.com",
+  "2019-2026 Copyright NanoVNA.com",
   "based on  @DiSlord @edy555 ... source",
   "Licensed under GPL.",
   "Version: " VERSION " ["\
@@ -1176,8 +1176,6 @@ static bool sweep(bool break_on_operation, uint16_t mask)
       (*sample_func)(&data[0]);             // calculate reflection coefficient
       if (mask & SWEEP_APPLY_CALIBRATION)   // Apply calibration
         apply_CH0_error_term(data, c_data);
-      if (mask & SWEEP_APPLY_EDELAY_S11) // Apply e-delay
-        applyEDelay(electrical_delayS11 * frequency, &data[0]);
     }
     // CH1:TRANSMISSION, reset and begin measure
     if (mask & SWEEP_CH1_MEASURE) {
@@ -1193,10 +1191,6 @@ static bool sweep(bool break_on_operation, uint16_t mask)
       (*sample_func)(&data[2]);              // Measure transmission coefficient
       if (mask & SWEEP_APPLY_CALIBRATION)    // Apply calibration
         apply_CH1_error_term(data, c_data);
-      if (mask & SWEEP_APPLY_EDELAY_S21)     // Apply e-delay
-        applyEDelay(electrical_delayS21 * frequency, &data[2]);
-      if (mask & SWEEP_APPLY_S21_OFFSET)
-        applyOffset(&data[2], offset);
     }
 #ifdef __VNA_Z_RENORMALIZATION__
     if (mask & SWEEP_USE_RENORMALIZATION)
@@ -1204,10 +1198,13 @@ static bool sweep(bool break_on_operation, uint16_t mask)
 #endif
     if (p_sweep < SWEEP_POINTS_MAX){
       if (mask & SWEEP_CH0_MEASURE){
+        if (mask & SWEEP_APPLY_EDELAY_S11) applyEDelay(electrical_delayS11 * frequency, &data[0]); // Apply e-delay
         measured[0][p_sweep][0] = data[0];
         measured[0][p_sweep][1] = data[1];
       }
       if (mask & SWEEP_CH1_MEASURE){
+        if (mask & SWEEP_APPLY_EDELAY_S21) applyEDelay(electrical_delayS21 * frequency, &data[2]); // Apply e-delay
+        if (mask & SWEEP_APPLY_S21_OFFSET) applyOffset(&data[2], offset);
         measured[1][p_sweep][0] = data[2];
         measured[1][p_sweep][1] = data[3];
       }
@@ -2107,7 +2104,7 @@ void set_trace_type(int t, int type, int channel)
     set_trace_refpos(t, trace_info_list[type].refpos);
     // Set default trace scale
     set_trace_scale(t, trace_info_list[type].scale_unit);
-    request_to_redraw(REDRAW_AREA); // need for update grid
+    request_to_redraw(REDRAW_AREA | REDRAW_PLOT | REDRAW_BACKUP); // need for update grid
   }
   set_trace_channel(t, channel);
 }
@@ -2217,7 +2214,7 @@ VNA_SHELL_FUNCTION(cmd_trace)
 #endif
   // enum TRC_LOGMAG, TRC_PHASE, TRC_DELAY, TRC_SMITH, TRC_POLAR, TRC_LINEAR, TRC_SWR, TRC_REAL, TRC_IMAG, TRC_R, TRC_X, TRC_Z, TRC_ZPHASE,
   //      TRC_G, TRC_B, TRC_Y, TRC_Rp, TRC_Xp, TRC_sC, TRC_sL, TRC_pC, TRC_pL, TRC_Q, TRC_Rser, TRC_Xser, TRC_Zser, TRC_Rsh, TRC_Xsh, TRC_Zsh, TRC_Qs21
-  static const char cmd_type_list[] = "logmag|phase|delay|smith|polar|linear|swr|real|imag|r|x|z|zp|g|b|y|rp|xp|sc|sl|pc|pl|q|rser|xser|zser|rsh|xsh|zsh|q21";
+  static const char cmd_type_list[] = "logmag|phase|delay|smith|polar|linear|swr|real|imag|r|x|z|zp|g|b|y|rp|xp|cs|ls|cp|lp|q|rser|xser|zser|rsh|xsh|zsh|q21";
   int type = get_str_index(argv[1], cmd_type_list);
   if (type >= 0) {
     int src = trace[t].channel;
@@ -2341,7 +2338,7 @@ VNA_SHELL_FUNCTION(cmd_touchcal)
   shell_printf("done" VNA_SHELL_NEWLINE_STR \
                "touch cal params: %d %d %d %d" VNA_SHELL_NEWLINE_STR,
                config._touch_cal[0], config._touch_cal[1], config._touch_cal[2], config._touch_cal[3]);
-  request_to_redraw(REDRAW_CLRSCR | REDRAW_AREA | REDRAW_BATTERY | REDRAW_CAL_STATUS | REDRAW_FREQUENCY);
+  request_to_redraw(REDRAW_ALL);
 }
 
 VNA_SHELL_FUNCTION(cmd_touchtest)
@@ -2657,7 +2654,7 @@ VNA_SHELL_FUNCTION(cmd_color)
   color = RGBHEX(my_atoui(argv[1]));
   config._lcd_palette[i] = color;
   // Redraw all
-  request_to_redraw(REDRAW_CLRSCR | REDRAW_AREA | REDRAW_CAL_STATUS | REDRAW_BATTERY | REDRAW_FREQUENCY);
+  request_to_redraw(REDRAW_ALL);
 }
 #endif
 

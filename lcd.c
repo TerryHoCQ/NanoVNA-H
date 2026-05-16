@@ -463,6 +463,8 @@ static const uint8_t ili9341_init_seq[] = {               // ILI9341 init sequen
 
 // ST7789 LCD_RDDID read return 0x42C2A97F (need shift right by 7 bit, so ID1 = 0x85, ID2 = 0x85, ID3 = 0x52)
 #define ST7789V_ID        0x858552
+// ST7789P3 LCD_RDDID read
+#define ST7789P3_ID        0x8181B3
 static const uint8_t ST7789V_init_seq[] = {               // ST7789V init sequence
   // cmd,           len, data...,
   LCD_SWRESET,        0,                                  // SW reset
@@ -485,7 +487,7 @@ static const uint8_t ST7789V_init_seq[] = {               // ST7789V init sequen
 // Read display ID and detect type
 static const uint8_t *get_lcd_init(void) {
   uint32_t id = lcd_send_register(LCD_RDDID, 0, 0) >> 7;
-  if (id == ST7789V_ID) lcd_type = st7789v;
+  if (id == ST7789V_ID || id == ST7789P3_ID ) lcd_type = st7789v;
   return lcd_type == ili9341_type ? ili9341_init_seq : ST7789V_init_seq;
 }
 
@@ -528,6 +530,7 @@ static const uint8_t ST7796S_init_seq[] = {               // ST7996s init sequen
 //0xE9,               1, 0x00,                            // Set Image Func
   LCD_WRDISBV,        1, 0xFF,                            // Set Brightness to Max
 //0xF7,               4, 0xA9, 0x51, 0x2C, 0x82,          // Adjust Control ??
+//LCD_INVON,          1, 0x01,                            // Inverse colors
   LCD_SLPOUT,         0,                                  // sleep out
   LCD_DISPON,         0,                                  // display on
   0                                                       // sentinel
@@ -665,7 +668,7 @@ static void lcd_bulk_buffer(int x, int y, int w, int h, pixel_t *buffer) {
 
 #ifdef __REMOTE_DESKTOP__
   if (sweep_mode & SWEEP_REMOTE) {
-    remote_region_t rd = {"bulk\r\n", x, y, w, h};
+    remote_region_t rd = {{'b','u','l','k','\r','\n'}, x, y, w, h};;
     send_region(&rd, (uint8_t *)buffer, w * h * sizeof(pixel_t));
   }
 #endif
@@ -712,7 +715,7 @@ void lcd_fill(int x, int y, int w, int h) {
 
 #ifdef __REMOTE_DESKTOP__
   if (sweep_mode & SWEEP_REMOTE) {
-    remote_region_t rd = {"fill\r\n", x, y, w, h};
+    remote_region_t rd = {{'f','i','l','l','\r','\n'}, x, y, w, h};
     send_region(&rd, (uint8_t *)&background_color, sizeof(pixel_t));
   }
 #endif
@@ -766,7 +769,7 @@ void lcd_set_colors(uint16_t fg_idx, uint16_t bg_idx) {
 void lcd_blitBitmap(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const uint8_t *b) {
 #if 1 // Use this for remote desktop (in this case bulk operation send to remote)
   pixel_t *buf = spi_buffer;
-  uint8_t bits = 0;
+  uint32_t bits = 0;
   for (uint32_t c = 0; c < height; c++) {
     for (uint32_t r = 0; r < width; r++) {
       if ((r&7) == 0) bits = *b++;
@@ -776,7 +779,7 @@ void lcd_blitBitmap(uint16_t x, uint16_t y, uint16_t width, uint16_t height, con
   }
   lcd_bulk(x, y, width, height);
 #else
-  uint8_t bits = 0;
+  uint32_t bits = 0;
   lcd_setWindow(x, y, width, height, LCD_RAMWR);
   for (uint32_t c = 0; c < height; c++) {
     for (uint32_t r = 0; r < width; r++) {
@@ -789,41 +792,36 @@ void lcd_blitBitmap(uint16_t x, uint16_t y, uint16_t width, uint16_t height, con
 #endif
 }
 
-void lcd_drawchar(uint8_t ch, int x, int y) {
-  lcd_blitBitmap(x, y, FONT_GET_WIDTH(ch), FONT_GET_HEIGHT, FONT_GET_DATA(ch));
-}
-
-#ifndef lcd_drawstring
-void lcd_drawstring(int16_t x, int16_t y, const char *str)
-{
-  int x_pos = x;
-  while (*str) {
-    uint8_t ch = *str++;
-    if (ch == '\n') {x = x_pos; y+=FONT_STR_HEIGHT; continue;}
-    const uint8_t *char_buf = FONT_GET_DATA(ch);
+//********************************************************************
+//          Draw symbol functions
+//********************************************************************
+int lcd_drawchar(uint8_t ch, int x, int y) {
     uint16_t w = FONT_GET_WIDTH(ch);
-    lcd_blitBitmap(x, y, w, FONT_GET_HEIGHT, char_buf);
-    x += w;
+  uint16_t step = FONT_WIDTH > 8 && w <= 8 ? 9 : w; // fix small char width
+  lcd_blitBitmap(x, y, step, FONT_GET_HEIGHT, FONT_GET_DATA(ch));
+  return w;
   }
-}
-#endif
 
+int lcd_draw_smallchar(uint8_t ch, int x, int y) {
+  uint16_t w = sFONT_GET_WIDTH(ch);
+  uint16_t step = sFONT_WIDTH > 8 && w <= 8 ? 9 : w; // fix small char width
+  lcd_blitBitmap(x, y, step, sFONT_GET_HEIGHT, sFONT_GET_DATA(ch));
+  return w;
+}
+
+//********************************************************************
+//          printf function
+//********************************************************************
 typedef struct {
   const void *vmt;
-  int16_t start_x, start_y;
-  int16_t x, y;
+  int start_x, start_y;
+  int x, y;
   uint16_t state;
 } lcdPrintStream;
 
 static void put_normal(lcdPrintStream *ps, uint8_t ch) {
   if (ch == '\n') {ps->x = ps->start_x; ps->y+=FONT_STR_HEIGHT; return;}
-  uint16_t w = FONT_GET_WIDTH(ch);
-#if _USE_FONT_ < 3
-  lcd_blitBitmap(ps->x, ps->y, w, FONT_GET_HEIGHT, FONT_GET_DATA(ch));
-#else
-  lcd_blitBitmap(ps->x, ps->y, w < 9 ? 9 : w, FONT_GET_HEIGHT, FONT_GET_DATA(ch));
-#endif
-  ps->x+= w;
+  ps->x+= lcd_drawchar(ch, ps->x, ps->y);
 }
 
 #if _USE_FONT_ != _USE_SMALL_FONT_
@@ -831,13 +829,7 @@ typedef void (*font_put_t)(lcdPrintStream *ps, uint8_t ch);
 static font_put_t put_char = put_normal;
 static void put_small(lcdPrintStream *ps, uint8_t ch) {
   if (ch == '\n') {ps->x = ps->start_x; ps->y+=sFONT_STR_HEIGHT; return;}
-  uint16_t w = sFONT_GET_WIDTH(ch);
-#if _USE_SMALL_FONT_ < 3
-  lcd_blitBitmap(ps->x, ps->y, w, sFONT_GET_HEIGHT, sFONT_GET_DATA(ch));
-#else
-  lcd_blitBitmap(ps->x, ps->y, w < 9 ? 9 : w, sFONT_GET_HEIGHT, sFONT_GET_DATA(ch));
-#endif
-  ps->x+= w;
+  ps->x+= lcd_draw_smallchar(ch, ps->x, ps->y);
 }
 void lcd_set_font(int type) {put_char = type == FONT_SMALL ? put_small : put_normal;}
 
@@ -861,7 +853,7 @@ static msg_t lcd_put(void *ip, uint8_t ch) {
 }
 
 // Simple print in buffer function
-int lcd_printf(int16_t x, int16_t y, const char *fmt, ...) {
+int lcd_printf(int x, int y, const char *fmt, ...) {
   // Init small lcd print stream
   struct lcd_printStreamVMT {
     _base_sequential_stream_methods
@@ -876,7 +868,7 @@ int lcd_printf(int16_t x, int16_t y, const char *fmt, ...) {
   return retval;
 }
 
-int lcd_printfV(int16_t x, int16_t y, const char *fmt, ...) {
+int lcd_printfV(int x, int y, const char *fmt, ...) {
   // Init small lcd print stream
   struct lcd_printStreamVMT {
     _base_sequential_stream_methods
@@ -894,6 +886,20 @@ int lcd_printfV(int16_t x, int16_t y, const char *fmt, ...) {
   // Return number of bytes that would have been written.
   return retval;
 }
+
+#ifndef lcd_drawstring
+void lcd_drawstring(int16_t x, int16_t y, const char *str) {
+  int x_pos = x;
+  while (*str) {
+    uint8_t ch = *str++;
+    if (ch == '\n') {x = x_pos; y+=FONT_STR_HEIGHT; continue;}
+    const uint8_t *char_buf = FONT_GET_DATA(ch);
+    uint16_t w = FONT_GET_WIDTH(ch);
+    lcd_blitBitmap(x, y, w, FONT_GET_HEIGHT, char_buf);
+    x += w;
+  }
+}
+#endif
 
 void lcd_blitBitmapScale(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t size, const uint8_t *b) {
   lcd_setWindow(x, y, w * size, h * size, LCD_RAMWR);
@@ -1021,6 +1027,7 @@ void ili9341_test(int mode) {
 // Definitions for MMC/SDC command
 #define CMD0     (0x40+0)     // GO_IDLE_STATE
 #define CMD1     (0x40+1)     // SEND_OP_COND
+#define CMD6     (0x40+6)     // SWITCH_FUNC
 #define CMD8     (0x40+8)     // SEND_IF_COND
 #define CMD9     (0x40+9)     // SEND_CSD
 #define CMD10    (0x40+10)    // SEND_CID
@@ -1039,11 +1046,12 @@ void ili9341_test(int mode) {
 #define ACMD41   (0xC0+41)    // SEND_OP_COND (ACMD)
 
 // MMC card type and status flags
-#define CT_MMC       0x01      // MMC v3
-#define CT_SD1       0x02      // SDv1
-#define CT_SD2       0x04      // SDv2
-#define CT_SDC       0x06      // SD
+#define CT_SD1       0x01      // SD Ver 1.X Standard Capacity
+#define CT_SD2       0x02      // SD Ver 2.0 and later Standard Capacity
+#define CT_MMC       0x03      // MMC
 #define CT_BLOCK     0x08      // Block addressing
+#define CT_HS50      0x10      // High Speed flag (50MHz)
+#define CT_CARD_IN   0x20      // Card in slot
 #define CT_WRPROTECT 0x40      // Write protect flag
 #define CT_POWER_ON  0x80      // Power ON flag
 
@@ -1410,6 +1418,15 @@ static uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg) {
   return r1;
 }
 
+#if 0
+// Transmit command to SD and receive data
+static uint8_t SD_SendCmdData(uint8_t cmd, uint32_t arg, void *buff, int size) {
+  uint8_t sts = SD_SendCmd(cmd, arg);
+  if (sts) return sts;
+  return SD_RxDataBlock((uint8_t*)buff, size, SD_TOKEN_START_BLOCK) ? 0 : 1;
+}
+#endif
+
 //*******************************************************
 //       diskio.c functions for file system library
 //*******************************************************
@@ -1468,13 +1485,6 @@ DSTATUS disk_initialize(BYTE pdrv) {
 #if defined(SD_USE_COMMAND_CRC) && defined(SD_USE_DATA_CRC)
       SD_SendCmd(CMD59, 1); // Enable CRC check on card
 #endif
-//      uint8_t csd[16];
-//      if (SD_SendCmd(CMD9, 0) == 0 && SD_RxDataBlock(csd, 16, SD_TOKEN_START_BLOCK)){
-//        DEBUG_PRINT(" CSD =");
-//        for (int i = 0; i<16; i++)
-//          DEBUG_PRINT(" %02x", csd[i]);
-//        DEBUG_PRINT("\r\n");
-//      }
     } else { // SDC V1 or MMC
       uint8_t cmd = (SD_SendCmd(ACMD41, 0) <= 1) ? ACMD41 : CMD1; // cmd for idle state
       DEBUG_PRINT(" CMD8 Fail, cmd = 0x%02x\r\n", cmd);
@@ -1484,6 +1494,39 @@ DSTATUS disk_initialize(BYTE pdrv) {
         type = cmd == ACMD41 ? CT_SD1 : CT_MMC;
       DEBUG_PRINT(" CMD16 %d %d\r\n", cnt, type);
     }
+#if 0 // Switch to High Speed mode (Allow run up to 50MHz, default speed up to 25MHz)
+    // CMD6 group 1 access mode (speed)
+    //      group 2 command system
+    //      group 3 driver strength
+    //      group 4 power limit
+    //      group 5 and 6 reserved
+    uint8_t buff[16*4];
+    uint32_t group = 1, speed = 1, argument = 0x00FFFFFF;
+    argument &= ~(0xF << ((group - 1) * 4));
+    argument |= speed << ((group - 1) * 4);
+    if (SD_SendCmdData(CMD6, (1 << 31) | argument, buff, 16*4) == 0) {
+      if ((buff[16] & 0x0F) == speed) CardStatus|= CT_HS50;
+      for (int i = 0; i < 16*4; i++) {DEBUG_PRINT(" %02x", buff[i]); if ((i&0xF) == 0xF) DEBUG_PRINT("\r\n");}
+  }
+#endif
+#if 0
+    uint8_t csd[16];
+    if (SD_SendCmdData(CMD9, 0, csd, 16) == 0) {
+      // Read CSD, and detect card sectors count
+   	  DEBUG_PRINT(" CSD =");
+      for (int i = 0; i < 16; i++) {DEBUG_PRINT(" %02x", csd[i]);} DEBUG_PRINT("\r\n");
+      uint32_t n, csize;
+      if ((csd[0] >> 6) == 1)  {                                                           // SDHC or SDEC V2 format
+        csize = ((uint32_t)csd[7]<<16)|((uint32_t)csd[8]<< 8)|((uint32_t)csd[9]<< 0);      //  C_SIZE [69:48] (on V2 additional 6 bits reserved and = 0)
+        n = 10;                                                                            //  Mult = 1<<10
+      }
+      else {                                                                               // MMC or SDC V1
+        csize = ((uint32_t)(csd[6]&0x3)<<10)|((uint32_t)csd[7]<<2)|((uint32_t)csd[8]>>6);  //  C_SIZE [73:62]
+        n = (csd[5]&0x0F) + (((csd[9]&0x3)<<1)|(csd[10]>>7)) + 2 - 9;                      //  Mult = 1<<(READ_BL_LEN[83:80] + C_SIZE_MULT[49:47] + 2 - 9)
+      }
+      CardSectors = (csize+1)<<n;
+    }
+#endif
   }
   SD_Unselect_SPI();
   DEBUG_PRINT("CardType %d\r\n", type);
@@ -1632,23 +1675,9 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void* buff) {
     // This command is used by f_mkfs and f_fdisk function to determine the size of volume/partition to be created.
     // It is required when FF_USE_MKFS == 1.
     case GET_SECTOR_COUNT:
-    {
-      // SEND_CSD
-      uint8_t csd[16];
-      if ((SD_SendCmd(CMD9, 0) == 0) && SD_RxDataBlock(csd, 16, SD_TOKEN_START_BLOCK)) {
-        uint32_t n, csize;
-        if ((csd[0] >> 6) == 1)  {  // SDC V2
-          csize = ((uint32_t)csd[7]<<16)|((uint32_t)csd[8]<< 8)|((uint32_t)csd[9]<< 0);
-          n = 10;
-        }
-        else {                      // MMC or SDC V1
-          csize = ((uint32_t)csd[8]>>6)+((uint32_t)csd[7]<<2)+((uint32_t)(csd[6]&0x03)<<10);
-          n = (csd[5]&0x0F)+((csd[10]&0x80)>>7)+((csd[9]&0x03)<<1) + 2 - 9;
-        }
-        *(uint32_t*)buff = (csize+1)<<n;
+      *(uint32_t*)buff = CardSectors;
         res = RES_OK;
       }
-    }
     break;
 #endif
   }
